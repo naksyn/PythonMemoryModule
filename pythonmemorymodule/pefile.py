@@ -38,7 +38,7 @@ from hashlib import md5
 import functools
 import copy as copymod
 
-import pythonmemorymodule.ordlookup
+import pythonmemorymodule.ordlookup as ordlookup
 
 codecs.register_error("backslashreplace_", codecs.lookup_error("backslashreplace"))
 
