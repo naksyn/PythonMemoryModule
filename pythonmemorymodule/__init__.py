@@ -774,6 +774,7 @@ class MemoryModule(pe.PE):
 						importordinal= entry_imports[j].ordinal
 					self.dbg('Found import ordinal entry, %s', cast(importordinal, LPCSTR))
 					funcref.contents = GetProcAddress(hmod, cast(importordinal, LPCSTR))
+					address = funcref.contents
 				else:
 					importname= entry_imports[j].name.decode('utf-8') 
 					self.dbg('Found import by name entry %s , at address 0x%x', importname, entry_imports[j].address)
