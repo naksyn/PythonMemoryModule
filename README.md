@@ -1,5 +1,5 @@
 # PythonMemoryModule
-pure-python implementation of MemoryModule technique to load a dll entirely from memory
+pure-python implementation of MemoryModule technique to load a dll or unmanaged exe entirely from memory
 
 <p align="center">
 <img width="399" alt="immagine" src="https://user-images.githubusercontent.com/59816245/210533889-424707d3-2c82-4ca3-afaf-cc19857fa2d6.png">
@@ -11,10 +11,10 @@ pure-python implementation of MemoryModule technique to load a dll entirely from
 
 # What is it
 
-PythonMemoryModule is a Python ctypes porting of the [MemoryModule](https://www.joachim-bauch.de/tutorials/loading-a-dll-from-memory/) technique originally published by [Joachim Bauch](https://github.com/fancycode/MemoryModule). It can load a dll using Python without requiring the use of an external library (pyd).
+PythonMemoryModule is a Python ctypes porting of the [MemoryModule](https://www.joachim-bauch.de/tutorials/loading-a-dll-from-memory/) technique originally published by [Joachim Bauch](https://github.com/fancycode/MemoryModule). It can load a dll or unmanaged exe using Python without requiring the use of an external library (pyd).
 It leverages [pefile](https://github.com/erocarrera/pefile) to parse PE headers and ctypes. 
 
-The tool was originally thought to be used as a [Pyramid](https://github.com/naksyn/Pyramid/) module to provide evasion against AV/EDR by loading dll payloads in python.exe entirely from memory, however other use-cases are possible (IP protection, pyds in-memory loading, spinoffs for other stealthier techniques) so I decided to create a dedicated repo.
+The tool was originally thought to be used as a [Pyramid](https://github.com/naksyn/Pyramid/) module to provide evasion against AV/EDR by loading dll/exe payloads in python.exe entirely from memory, however other use-cases are possible (IP protection, pyds in-memory loading, spinoffs for other stealthier techniques) so I decided to create a dedicated repo.
 
 
 # Why it can be useful
@@ -48,3 +48,10 @@ Note: if you use staging in your malleable profile the dll would not be able to 
 # How to detect it
 
 Using the MemoryModule technique will mostly respect the sections' permissions of the target DLL and avoid the noisy RWX approach. However within the program memory there will be a private commit not backed by a dll on disk and this is a MemoryModule telltale.
+
+
+
+### Future improvements
+
+ 1. add support for argument parsing.
+ 2. add support (basic) for .NET assemblies execution.
