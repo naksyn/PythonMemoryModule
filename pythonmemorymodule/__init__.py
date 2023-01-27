@@ -116,12 +116,12 @@ PIMAGE_DOS_HEADER = POINTER(IMAGE_DOS_HEADER)
 ''' ref: https://github.com/wine-mirror/wine/blob/master/include/winnt.h
 
 typedef struct _IMAGE_TLS_DIRECTORY64 {
-    ULONGLONG   StartAddressOfRawData;
-    ULONGLONG   EndAddressOfRawData;
-    ULONGLONG   AddressOfIndex;
-    ULONGLONG   AddressOfCallBacks;
-    DWORD       SizeOfZeroFill;
-    DWORD       Characteristics;
+	ULONGLONG   StartAddressOfRawData;
+	ULONGLONG   EndAddressOfRawData;
+	ULONGLONG   AddressOfIndex;
+	ULONGLONG   AddressOfCallBacks;
+	DWORD	   SizeOfZeroFill;
+	DWORD	   Characteristics;
 } IMAGE_TLS_DIRECTORY64, *PIMAGE_TLS_DIRECTORY64;
 
 
@@ -133,9 +133,9 @@ typedef VOID (CALLBACK *PIMAGE_TLS_CALLBACK)(
 #ref: https://github.com/arizvisa/syringe/blob/1f0ea1f514426fd774903c70d03638ecd40a97c3/lib/pecoff/portable/tls.py
 
 class IMAGE_TLS_CALLBACK(c_void_p):
-    '''
-    void NTAPI IMAGE_TLS_CALLBACK(PVOID DllHandle, DWORD Reason, PVOID Reserved)
-    '''
+	'''
+	void NTAPI IMAGE_TLS_CALLBACK(PVOID DllHandle, DWORD Reason, PVOID Reserved)
+	'''
 
 PIMAGE_TLS_CALLBACK = POINTER(IMAGE_TLS_CALLBACK)
 
@@ -148,7 +148,7 @@ class IMAGE_TLS_DIRECTORY(Structure):
 		('SizeOfZeroFill', DWORD),
 		('Characteristics', DWORD),
 	]
-    
+	
 PIMAGE_TLS_DIRECTORY = POINTER(IMAGE_TLS_DIRECTORY)
 
 
@@ -334,6 +334,9 @@ TLSexecProc = WINFUNCTYPE(BOOL, HINSTANCE, DWORD, LPVOID)
 PTLSExecProc = POINTER(TLSexecProc)
 HMEMORYMODULE = HMODULE
 
+ExeEntryProc = WINFUNCTYPE(BOOL, LPVOID)
+PExeEntryProc = POINTER(ExeEntryProc)
+
 # Constants
 MEM_COMMIT = 0x00001000
 MEM_DECOMMIT = 0x4000
@@ -480,12 +483,13 @@ class MemoryModule(pe.PE):
 		print('DEBUG: %s' % msg)
 
 	def load_module(self):
-		if not self.is_dll():
-			raise WindowsError('The specified module does not appear to be a DLL.')
+		if not self.is_exe() and not self.is_dll():
+			raise WindowsError('The specified module does not appear to be an exe nor a dll.')
 		if self.PE_TYPE == pe.OPTIONAL_HEADER_MAGIC_PE and isx64:
-			raise WindowsError('The dll you attempted to load appears to be an 32-bit DLL, but you are using a 64-bit version of Python.')
+			raise WindowsError('The exe you attempted to load appears to be an 32-bit exe, but you are using a 64-bit version of Python.')
 		elif self.PE_TYPE == pe.OPTIONAL_HEADER_MAGIC_PE_PLUS and not isx64:
-			raise WindowsError('The dll you attempted to load appears to be an 64-bit DLL, but you are using a 32-bit version of Python.')
+			raise WindowsError('The exe you attempted to load appears to be an 64-bit exe, but you are using a 32-bit version of Python.')
+		
 		self._codebaseaddr = VirtualAlloc(
 			self.OPTIONAL_HEADER.ImageBase, # To test relocations, add some values here i.e. +int(0x030000000)
 			self.OPTIONAL_HEADER.SizeOfImage,
@@ -530,7 +534,7 @@ class MemoryModule(pe.PE):
 		szheaders = self.DOS_HEADER.e_lfanew + self.OPTIONAL_HEADER.SizeOfHeaders
 		tmpheaders = create_unsigned_buffer(szheaders, self.__data__[:szheaders])
 		if not memmove(self._headersaddr, cast(tmpheaders, c_void_p), szheaders):
-	 		raise RuntimeError('memmove failed')
+			 raise RuntimeError('memmove failed')
 		del tmpheaders
 
 		self._headersaddr += self.DOS_HEADER.e_lfanew
@@ -554,24 +558,42 @@ class MemoryModule(pe.PE):
 		self.ExecuteTLS()
 
 		entryaddr = self.pythonmemorymodule.contents.headers.contents.OptionalHeader.AddressOfEntryPoint
-		self.dbg('Checking dll for entry point.')
+		
+		self.dbg('Checking for entry point.')
 		if entryaddr != 0:
-			entryaddr += codebase
-			self.dbg('Found entry at address: 0x%x', entryaddr)
-			DllEntry = DllEntryProc(entryaddr)
-			if not bool(DllEntry):
-				self.free_library(self.pythonmemorymodule)
-				raise WindowsError('dll has no entry point.\n')
-			self.dbg("calling DllEntry with DLL_PROCESS_ATTACH")
-			self.dbg('entryaddr address: 0x%x', entryaddr)
-			try:
-				success = DllEntry(codebase, DLL_PROCESS_ATTACH, 0)
-			except Exception as e:
-				print(e)
+			entryaddr += codebase		 
 			
+			if self.is_exe():
+				ExeEntry = ExeEntryProc(entryaddr)
+				if not bool(ExeEntry):
+					self.free_library()
+					raise WindowsError('exe has no entry point.\n')
+				try:
+					self.dbg("Calling exe entrypoint 0x%x", entryaddr)
+					
+					success = ExeEntry(entryaddr)
+				except Exception as e:
+					print(e)
+					
+			elif self.is_dll():
+				DllEntry = DllEntryProc(entryaddr)
+				if not bool(DllEntry):
+					self.free_library()
+					raise WindowsError('dll has no entry point.\n')
+					
+				try:
+					self.dbg("Calling dll entrypoint 0x%x with DLL_PROCESS_ATTACH", entryaddr)
+					success = DllEntry(codebase, DLL_PROCESS_ATTACH, 0)
+				except Exception as e:
+					print(e)
+					
 			if not bool(success):
-				self.free_library(self.pythonmemorymodule)
-				raise WindowsError('dll could not be loaded.')
+				if self.is_dll():
+					self.free_library()
+					raise WindowsError('dll could not be loaded.')
+				else:
+					self.free_exe()
+					raise WindowsError('exe could not be loaded')
 			self.pythonmemorymodule.contents.initialized = 1
 
 	def IMAGE_FIRST_SECTION(self):
@@ -623,8 +645,8 @@ class MemoryModule(pe.PE):
 			if not bool(tlsres):
 				raise WindowsError('TLS could not be executed.')
 			else:
-			    # 8 bytes step - this is the size of the callback field in the TLS callbacks table. Need to initialize callback to IMAGE_TLS_CALLBACK with
-			    # the updated address, otherwise callback.value won't be null when the callback table is finished and the while won't exit
+				# 8 bytes step - this is the size of the callback field in the TLS callbacks table. Need to initialize callback to IMAGE_TLS_CALLBACK with
+				# the updated address, otherwise callback.value won't be null when the callback table is finished and the while won't exit
 				self.dbg("TLS callback executed")
 				callbackaddr+=sizeof(c_ulonglong)
 				callback= IMAGE_TLS_CALLBACK.from_address(callbackaddr)				
@@ -670,7 +692,7 @@ class MemoryModule(pe.PE):
 			protect = ProtectionFlags[executable][readable][writeable]
 			self.dbg("Protection flag:%d",protect)
 			if checkCharacteristic(section, IMAGE_SCN_MEM_NOT_CACHED):
-				print("not cached")            
+				print("not cached")			
 				protect |= PAGE_NOCACHE
 			
 
@@ -802,6 +824,16 @@ class MemoryModule(pe.PE):
 				if self.pythonmemorymodule.contents.modules[i] != HANDLE(INVALID_HANDLE_VALUE):
 					FreeLibrary(self.pythonmemorymodule.contents.modules[i])
 
+		if bool(self._codebaseaddr):
+			VirtualFree(self._codebaseaddr, 0, MEM_RELEASE)
+
+		HeapFree(GetProcessHeap(), 0, self.pythonmemorymodule)
+		self.close()
+		
+	def free_exe(self):
+		self.dbg("Freeing exe")
+		if not bool(self.pythonmemorymodule): return
+		pmodule = pointer(self.pythonmemorymodule)
 		if bool(self._codebaseaddr):
 			VirtualFree(self._codebaseaddr, 0, MEM_RELEASE)
 
