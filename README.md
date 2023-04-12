@@ -1,3 +1,5 @@
+![Supported Python versions](https://img.shields.io/badge/python-3.7+-blue.svg) [![Twitter](https://img.shields.io/twitter/follow/naksyn?label=naksyn&style=social)](https://twitter.com/intent/follow?screen_name=naksyn)
+
 # PythonMemoryModule
 pure-python implementation of MemoryModule technique to load a dll or unmanaged exe entirely from memory
 
