@@ -14,6 +14,7 @@ pure-python implementation of MemoryModule technique to load a dll or unmanaged 
 # What is it
 
 PythonMemoryModule is a Python ctypes porting of the [MemoryModule](https://www.joachim-bauch.de/tutorials/loading-a-dll-from-memory/) technique originally published by [Joachim Bauch](https://github.com/fancycode/MemoryModule). It can load a dll or unmanaged exe using Python without requiring the use of an external library (pyd) and has (partial) support for commandline parameters passing.
+
 It leverages [pefile](https://github.com/erocarrera/pefile) to parse PE headers, [PythonForWindows](https://github.com/hakril/PythonForWindows) to access process parameters, and ctypes for the heavy lifting. 
 The tool was originally thought to be used as a [Pyramid](https://github.com/naksyn/Pyramid/) module to provide evasion against AV/EDR by loading dll/exe payloads in python.exe entirely from memory, however other use-cases are possible (IP protection, pyds in-memory loading, spinoffs for other stealthier techniques) so I decided to create a dedicated repo.
 
