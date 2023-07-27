@@ -18,10 +18,13 @@ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTH
 DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
 OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-
+import sys
 from ctypes import *
 from ctypes.wintypes import *
 import pythonmemorymodule.pefile as pe
+import windows
+import threading
+import time
 
 kernel32 = windll.kernel32
 
@@ -471,8 +474,9 @@ class MemoryModule(pe.PE):
 
 	_foffsets_ = {}
 
-	def __init__(self, name = None, data = None, debug=False):
+	def __init__(self, name = None, data = None, debug=False, command=None):
 		self._debug_ = debug or debug_output
+		self.new_command=command
 		pe.PE.__init__(self, name, data)
 		self.load_module()
 
@@ -482,7 +486,86 @@ class MemoryModule(pe.PE):
 			msg = msg % tuple(args)
 		print('DEBUG: %s' % msg)
 
+	def cmdline_check(self):
+		cp=windows.current_process
+		peb = windows.current_process.peb
+		
+		commandline = peb.commandline
+		self.dbg("Original PEB commamdline length: {}".format(commandline.Length))
+		self.dbg("New command ommand length: {}".format(len(self.new_command)))
+
+		if len(self.new_command) > commandline.Length:
+			print("[!] Error - Not enough space on PEB commandline for stomping. Try increasing the commandline (e.g. by placing python binary in a nested folder) - Exiting")
+			sys.exit()
+
+	def stomp_PEB(self):
+		self.cp=windows.current_process
+		peb = windows.current_process.peb
+		self.dbg("Current process PEB is <{0}>".format(peb))
+		
+		self.commandline = peb.commandline  
+		self.cmdlineaddr= self.commandline.Buffer
+		self.cmdlinetext=self.cp.read_memory(self.cmdlineaddr, self.commandline.Length).decode("utf-16")
+
+		self.dbg("Original commandline: {}".format(self.cmdlinetext))  
+		newcmd=self.new_command + " \x00"
+		encnewcmd=newcmd.encode("utf-16")
+
+		self.cp.write_memory(self.cmdlineaddr,encnewcmd)
+ 
+		self.dbg("Stomped commandline: {}".format(self.cp.read_memory(self.cmdlineaddr, self.commandline.Length).decode("utf-16")))
+
+	
+	def unstomp_PEB(self):
+		time.sleep(2)
+		self.dbg("Restoring original commandline: {}".format(self.cmdlinetext))
+		self.cp.write_memory(self.cmdlineaddr,self.cmdlinetext.encode("utf-16"))
+
+
+	def execPE(self):
+			codebase = self._codebaseaddr
+			entryaddr = self.pythonmemorymodule.contents.headers.contents.OptionalHeader.AddressOfEntryPoint		
+		
+			self.dbg('Checking for entry point.')
+			if entryaddr != 0:
+				entryaddr += codebase		 
+				
+				if self.is_exe():
+					ExeEntry = ExeEntryProc(entryaddr)
+					if not bool(ExeEntry):
+						self.free_library()
+						raise WindowsError('exe has no entry point.\n')
+					try:
+						self.dbg("Calling exe entrypoint 0x%x", entryaddr)					
+						success = ExeEntry(entryaddr)
+					except Exception as e:
+						print(e)
+						
+				elif self.is_dll():
+					DllEntry = DllEntryProc(entryaddr)
+					if not bool(DllEntry):
+						self.free_library()
+						raise WindowsError('dll has no entry point.\n')
+						
+					try:
+						self.dbg("Calling dll entrypoint 0x%x with DLL_PROCESS_ATTACH", entryaddr)
+						success = DllEntry(codebase, DLL_PROCESS_ATTACH, 0)
+					except Exception as e:
+						print(e)
+						
+				if not bool(success):
+					if self.is_dll():
+						self.free_library()
+						raise WindowsError('dll could not be loaded.')
+					else:
+						self.free_exe()
+						raise WindowsError('exe could not be loaded')
+				self.pythonmemorymodule.contents.initialized = 1
+	
 	def load_module(self):
+		if self.new_command:
+			self.cmdline_check()
+
 		if not self.is_exe() and not self.is_dll():
 			raise WindowsError('The specified module does not appear to be an exe nor a dll.')
 		if self.PE_TYPE == pe.OPTIONAL_HEADER_MAGIC_PE and isx64:
@@ -556,46 +639,17 @@ class MemoryModule(pe.PE):
 		self.finalize_sections()
 		self.dbg('Executing TLS.')
 		self.ExecuteTLS()
-
-		entryaddr = self.pythonmemorymodule.contents.headers.contents.OptionalHeader.AddressOfEntryPoint
+		self.dbg('Stomping PEB')
+		self.stomp_PEB()
 		
-		self.dbg('Checking for entry point.')
-		if entryaddr != 0:
-			entryaddr += codebase		 
+		
+		
+		self.dbg('Starting new thread to execute PE')
+		my_thread = threading.Thread(target=self.execPE)
+		my_thread.start()
+		self.unstomp_PEB()
 			
-			if self.is_exe():
-				ExeEntry = ExeEntryProc(entryaddr)
-				if not bool(ExeEntry):
-					self.free_library()
-					raise WindowsError('exe has no entry point.\n')
-				try:
-					self.dbg("Calling exe entrypoint 0x%x", entryaddr)
-					
-					success = ExeEntry(entryaddr)
-				except Exception as e:
-					print(e)
-					
-			elif self.is_dll():
-				DllEntry = DllEntryProc(entryaddr)
-				if not bool(DllEntry):
-					self.free_library()
-					raise WindowsError('dll has no entry point.\n')
-					
-				try:
-					self.dbg("Calling dll entrypoint 0x%x with DLL_PROCESS_ATTACH", entryaddr)
-					success = DllEntry(codebase, DLL_PROCESS_ATTACH, 0)
-				except Exception as e:
-					print(e)
-					
-			if not bool(success):
-				if self.is_dll():
-					self.free_library()
-					raise WindowsError('dll could not be loaded.')
-				else:
-					self.free_exe()
-					raise WindowsError('exe could not be loaded')
-			self.pythonmemorymodule.contents.initialized = 1
-
+	   
 	def IMAGE_FIRST_SECTION(self):
 		return self._headersaddr + IMAGE_NT_HEADERS.OptionalHeader.offset + self.FILE_HEADER.SizeOfOptionalHeader
 	
@@ -685,7 +739,8 @@ class MemoryModule(pe.PE):
 			self.dbg("write %d",checkCharacteristic(section, IMAGE_SCN_MEM_WRITE))
 
 			if checkCharacteristic(section, IMAGE_SCN_MEM_DISCARDABLE):
-				addr = getPhysAddr(section)
+				addr = self.sections[i].Misc_PhysicalAddress #getPhysAddr(section)
+				self.dbg("physaddr:0x%x", addr)
 				VirtualFree(addr, section.contents.SizeOfRawData, MEM_DECOMMIT)
 				continue
 
@@ -717,8 +772,8 @@ class MemoryModule(pe.PE):
 		if directory.Size <= 0: return
 		relocaddr=codeBaseAddr + directory.VirtualAddress
 		relocation = IMAGE_BASE_RELOCATION.from_address(relocaddr)
-		maxreloc = lambda r: (relocation.SizeOfBlock - IMAGE_SIZEOF_BASE_RELOCATION) / 2
 
+		maxreloc = lambda r: (relocation.SizeOfBlock - IMAGE_SIZEOF_BASE_RELOCATION) / 2
 		while relocation.VirtualAddress > 0:
 			i = 0
 			dest = codeBaseAddr + relocation.VirtualAddress
