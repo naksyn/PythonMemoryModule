@@ -563,8 +563,11 @@ class MemoryModule(pe.PE):
 				self.pythonmemorymodule.contents.initialized = 1
 	
 	def load_module(self):
-		if self.new_command:
+		if self.new_command != None and len(self.new_command) != 0:
+			passed_args=True
 			self.cmdline_check()
+		else:
+			passed_args=False
 
 		if not self.is_exe() and not self.is_dll():
 			raise WindowsError('The specified module does not appear to be an exe nor a dll.')
@@ -639,15 +642,17 @@ class MemoryModule(pe.PE):
 		self.finalize_sections()
 		self.dbg('Executing TLS.')
 		self.ExecuteTLS()
-		self.dbg('Stomping PEB')
-		self.stomp_PEB()
+		if passed_args:
+			self.dbg('Stomping PEB')
+			self.stomp_PEB()
 		
 		
 		
 		self.dbg('Starting new thread to execute PE')
 		my_thread = threading.Thread(target=self.execPE)
 		my_thread.start()
-		self.unstomp_PEB()
+		if passed_args:
+			self.unstomp_PEB()
 			
 	   
 	def IMAGE_FIRST_SECTION(self):
